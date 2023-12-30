@@ -9,21 +9,26 @@ from tqdm import tqdm
 import argparse
 import numpy as np
 from model.utils import *
+from model.unet_utils import *
 from model.config_utils import parse_config_args
 import random
 import wandb
 import datetime
 import os
 
-def train_epoch(model, train_loader, optimizer):
+def train_epoch(model, train_loader, optimizer, use_diffusion):
     model.train()
     loss_sum = 0
     avg_loss_dict = {}
     for i, (img, text) in enumerate(tqdm(train_loader)):
+        print('using diffusion: ', use_diffusion)
         if hasattr(config, 'WARMUP_EPOCHS') and epoch < config.WARMUP_EPOCHS:
+            use_diffusion = False # using resnet decoder for vae warmup
             print('in warmup phase')
             mask_img, mask_text = False, False
         elif config.MASKING:
+            if hasattr(config, 'DIFFUSION') and config.DIFFUSION:
+                use_diffusion = True
             print('in masking phase')
             mask_img, mask_text = get_masks(warmup=False) 
         else:
@@ -36,28 +41,35 @@ def train_epoch(model, train_loader, optimizer):
 
         optimizer.zero_grad()
 
-        output = model(img, text_input, mask_img, mask_text)
+        output = model(img, text_input, mask_img, mask_text, use_diffusion)
 
-        if args.debug and i % 10 == 0:
-            disp_img = visualize_data(img, text_input, model.tokenizer, output, config, mask_img, mask_text)
+        if args.debug and i % 20 == 0:
+            sample_diffusion = False
+            if i % 100 == 0 and use_diffusion:
+                sample_diffusion = True
+            print('sample diffusion: ', sample_diffusion)
+            disp_img = visualize_data(img, text_input, model.tokenizer, output, config, mask_img, mask_text, model=model, sample_diffusion=sample_diffusion)
             cv2.imshow('disp_img', disp_img)
             cv2.waitKey(1)
             datetime_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             # cv2.imwrite('logs/' + args.config + '/train_' + str(epoch) + '_' + datetime_str + '.jpg', (disp_img * 255).astype(np.uint8))
 
-        loss_dict = criterion(output, img, text_input, mask_img, mask_text)
+        loss_dict = criterion(output, img, text_input, mask_img, mask_text, use_diffusion)
+
+             # quit if loss is nan
+        if torch.isnan(loss_dict['loss_total']):
+            print('loss is nan')
+            # quit()
+            loss_dict['loss_total'] = torch.tensor(0).to(device)
+
         loss = loss_dict['loss_total']
         loss.backward()
-
-        # quit if loss is nan
-        if torch.isnan(loss):
-            print('loss is nan, quitting')
-            quit()
 
         if hasattr(config, 'CLIP_GRADS') and config.CLIP_GRADS:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.CLIP_GRADS_NORM)
 
         optimizer.step()
+        # ema.step_ema(ema_model, model)
 
         loss_sum += loss.item()
 
@@ -83,7 +95,7 @@ def train_epoch(model, train_loader, optimizer):
 
     return loss_sum / len(train_loader)
 
-def val_epoch(model, val_loader):
+def val_epoch(model, val_loader, use_diffusion):
     model.eval()
     loss_sum = 0
     avg_loss_dict = {}
@@ -93,29 +105,32 @@ def val_epoch(model, val_loader):
                 mask_img, mask_text = get_masks() 
             else:
                 mask_img, mask_text = False, False
-            
-            # print('text: ', text)
+
+            use_diffusion = False # using resnet decoder for vae warmup
+            if hasattr(config, 'WARMUP_EPOCHS') and epoch < config.WARMUP_EPOCHS:
+                use_diffusion = False # using resnet decoder for vae warmup
+            elif hasattr(config, 'DIFFUSION') and config.DIFFUSION:
+                use_diffusion = True
+
             img = img.to(device).float()
-            # text_input = model.tokenizer(text, return_tensors="pt", padding=True).to(device)
             text_input = text.to(device)
 
-            output = model(img, text_input, mask_img, mask_text)
+            output = model(img, text_input, mask_img, mask_text, use_diffusion)
 
-            if args.debug and i % 10 == 0:
-                disp_img = visualize_data(img, text_input, model.tokenizer, output, config, mask_img, mask_text)
+            if args.debug and i % 20 == 0:
+                sample_diffusion = False
+                if i % 100 == 0 and use_diffusion:
+                    sample_diffusion = True
+                disp_img = visualize_data(img, text_input, model.tokenizer, output, config, mask_img, mask_text, model=model, sample_diffusion=sample_diffusion)
                 cv2.imshow('disp_img', disp_img)
                 cv2.waitKey(1)
                 datetime_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
                 # cv2.imwrite('logs/val_' + str(epoch) + '_' + datetime_str + '.jpg', (disp_img * 255).astype(np.uint8))
-                cv2.imwrite('logs/' + args.config + '/val_' + str(epoch) + '_' + datetime_str + '.jpg', (disp_img * 255).astype(np.uint8))
+                cv2.imwrite(save_dir + '/val_' + str(epoch) + '_' + datetime_str + '.jpg', (disp_img * 255).astype(np.uint8))
 
-
-            loss_dict = criterion(output, img, text_input, mask_img, mask_text)
+            loss_dict = criterion(output, img, text_input, mask_img, mask_text, use_diffusion)
             loss = loss_dict['loss_total']
             loss_sum += loss.item()
-
-            # for key in loss_dict:
-            #     wandb.log({key + '_val': loss_dict[key].item()})
 
             # recording the running average of the loss
             for key in loss_dict:
@@ -140,13 +155,15 @@ def get_text_loss(pred, target):
     pred = pred.view(-1, pred.size(-1)) # (batch_size*seq_len, vocab_size)
     target = target.view(-1) # (batch_size*seq_len)
 
-    # print('pred size: ', pred.size(), 'target size: ', target.size())
     # cross entropy loss, ignoring padding
     loss = torch.nn.functional.cross_entropy(pred, target, ignore_index=0)
 
     return loss
 
-def criterion(output, img, text_input, mask_img, mask_text):
+def get_diffusion_loss(pred_noise, noise):
+    return torch.nn.functional.mse_loss(pred_noise, noise) 
+
+def criterion(output, img, text_input, mask_img, mask_text, use_diffusion):
     text_loss = get_text_loss(output['pred_text'], text_input['input_ids'])
 
     # applying unit gaussian prior to combined image and text features
@@ -154,23 +171,43 @@ def criterion(output, img, text_input, mask_img, mask_text):
     combined_prior_logvar = torch.zeros_like(output['combined_embedding_logvars']).to(device)
     combined_kl_loss = kl_divergence(output['combined_embedding_means'], output['combined_embedding_logvars'], combined_prior_mean, combined_prior_logvar)
 
-    # applying gaussian loss between output['pred_img'] and img (t2i is not deterministic, so using max likelihood)
-    img_loss_gaussian = torch.nn.GaussianNLLLoss()(output['pred_img_means'], img, torch.exp(output['pred_img_logvars'])) # input, target, variance
-    
-     # applying L2 loss between output['pred_img'] and pred_img (reconstruction is deterministic)
-    img_loss_L2 = torch.nn.functional.mse_loss(output['pred_img_means'], img)
+    # if hasattr(config, 'DIFFUSION') and config.DIFFUSION:
+    if use_diffusion:
+        img_loss_diffusion = get_diffusion_loss(output['pred_img_noise'], output['gt_img_noise'])
+        # img_loss_L2 = torch.nn.functional.mse_loss(output['pred_img'], img)
+        img_loss_L2 = torch.tensor(0).to(device)
+        img_loss_gaussian = torch.tensor(0).to(device)
+    else:
+        # applying gaussian loss between output['pred_img'] and img (t2i is not deterministic, so using max likelihood)
+        img_loss_gaussian = torch.nn.GaussianNLLLoss()(output['pred_img_means'], img, torch.exp(output['pred_img_logvars'])) # input, target, variance
+        # applying L2 loss between output['pred_img'] and pred_img (reconstruction is deterministic)
+        img_loss_L2 = torch.nn.functional.mse_loss(output['pred_img'], img)
+        img_loss_diffusion = torch.tensor(0).to(device)
 
     if args.debug:
         print('img_loss_gaussian: ', img_loss_gaussian)
         print('img_loss_L2: ', img_loss_L2)
         print('text_loss: ', text_loss)
-        print('kl_loss: ', combined_kl_loss)        
+        print('kl_loss: ', combined_kl_loss)   
+        print('diffusion_loss: ', img_loss_diffusion)     
 
     if mask_img:
         print('masking img')
-        loss_total = config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss # TODO: use this?
-        # loss_total = config.LAMBDA_IMAGE * img_loss + config.LAMBDA_KL * combined_kl_loss
-        # loss_total = config.LAMBDA_IMAGE * img_loss + config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss
+        loss_total = config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss # supervise text and kl
+        # loss_total = config.LAMBDA_IMAGE * img_loss + config.LAMBDA_KL * combined_kl_loss # supervise img and kl
+        # loss_total = config.LAMBDA_IMAGE * img_loss + config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss # supervise img, text, and kl
+        
+        # ensuring each loss is weighted equally
+        # unnormalized_loss = abs(text_loss) + abs(combined_kl_loss)
+        # text_ratio = abs(unnormalized_loss) / abs(text_loss)
+        # kl_ratio = abs(unnormalized_loss) / abs(combined_kl_loss)
+        # loss_total = text_ratio * config.LAMBDA_TEXT * text_loss + kl_ratio * config.LAMBDA_KL * combined_kl_loss
+        # print('loss_total: ', loss_total)
+        # print('unnormalized_loss: ', unnormalized_loss)
+        # print('text_ratio: ', text_ratio)
+        # print('kl_ratio: ', kl_ratio)
+        # print('text_ratio * text_loss: ', text_ratio * text_loss)
+        # print('kl_ratio * combined_kl_loss: ', kl_ratio * combined_kl_loss)
         
         # ensuring each loss is weighted equally
         unnormalized_loss = abs(text_loss) + abs(combined_kl_loss)
@@ -189,19 +226,25 @@ def criterion(output, img, text_input, mask_img, mask_text):
             'text_only_loss_total': loss_total,
             't2t_loss': text_loss,
             't2i_loss': img_loss_gaussian,
-            'text_only_combined_kl_loss': combined_kl_loss
+            'text_only_combined_kl_loss': combined_kl_loss,
+            'diffusion_loss': img_loss_diffusion
         }
     elif mask_text:
         print('masking text')
-        # loss_total = config.LAMBDA_IMAGE * img_loss_gaussian + config.LAMBDA_KL * combined_kl_loss # TODO: use this?
-        loss_total = config.LAMBDA_IMAGE * img_loss_L2 + config.LAMBDA_KL * combined_kl_loss
-        # loss_total = config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss
-        # loss_total = config.LAMBDA_IMAGE * img_loss + config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss
+        # if hasattr(config, 'DIFFUSION') and config.DIFFUSION:
+        if use_diffusion:
+            loss_total = config.LAMBDA_IMAGE * img_loss_diffusion + config.LAMBDA_KL * combined_kl_loss # supervise img and kl
+        else:
+            # loss_total = config.LAMBDA_IMAGE * img_loss_gaussian + config.LAMBDA_KL * combined_kl_loss # supervise img (Gaussian) and kl
+            loss_total = config.LAMBDA_IMAGE * img_loss_L2 + config.LAMBDA_KL * combined_kl_loss # supervise img (L2) and kl
+            # loss_total = config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss # supervise text and kl
+            # loss_total = config.LAMBDA_IMAGE * img_loss + config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss # supervise img, text, and kl
         
         # ensuring each loss is weighted equally
-        unnormalized_loss = abs(img_loss_gaussian) + abs(combined_kl_loss)
-        img_ratio = abs(unnormalized_loss) / abs(img_loss_gaussian)
-        kl_ratio = abs(unnormalized_loss) / abs(combined_kl_loss)
+        # unnormalized_loss = abs(img_loss_gaussian) + abs(combined_kl_loss)
+        # img_ratio = abs(unnormalized_loss) / abs(img_loss_gaussian)
+        # kl_ratio = abs(unnormalized_loss) / abs(combined_kl_loss)
+
         # loss_total = img_ratio * config.LAMBDA_IMAGE * img_loss_gaussian + kl_ratio * config.LAMBDA_KL * combined_kl_loss
         # print('loss_total: ', loss_total)
         # print('unnormalized_loss: ', unnormalized_loss)
@@ -215,17 +258,22 @@ def criterion(output, img, text_input, mask_img, mask_text):
             'img_only_loss_total': loss_total,
             'i2i_loss': img_loss_L2,
             'i2t_loss': text_loss,
-            'img_only_combined_kl_loss': combined_kl_loss
+            'img_only_combined_kl_loss': combined_kl_loss,
+            'diffusion_loss': img_loss_diffusion
         }
     else:
         print('not masking')
-        loss_total = config.LAMBDA_IMAGE * img_loss_L2 + config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss
+        # if hasattr(config, 'DIFFUSION') and config.DIFFUSION:
+        if use_diffusion:
+            loss_total = config.LAMBDA_IMAGE * img_loss_diffusion + config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss # supervise img (diffusion), text, and kl
+        else:
+            loss_total = config.LAMBDA_IMAGE * img_loss_L2 + config.LAMBDA_TEXT * text_loss + config.LAMBDA_KL * combined_kl_loss # supervise img, text (L2), and kl
         
         # ensuring each loss is weighted equally
-        unnormalized_loss = abs(img_loss_L2) + abs(text_loss) + abs(combined_kl_loss)
-        img_ratio = abs(unnormalized_loss) / abs(img_loss_L2)
-        text_ratio = abs(unnormalized_loss) / abs(text_loss)
-        kl_ratio = abs(unnormalized_loss) / abs(combined_kl_loss)
+        # unnormalized_loss = abs(img_loss_L2) + abs(text_loss) + abs(combined_kl_loss)
+        # img_ratio = abs(unnormalized_loss) / abs(img_loss_L2)
+        # text_ratio = abs(unnormalized_loss) / abs(text_loss)
+        # kl_ratio = abs(unnormalized_loss) / abs(combined_kl_loss)
         # loss_total = img_ratio * config.LAMBDA_IMAGE * img_loss_L2 + text_ratio * config.LAMBDA_TEXT * text_loss + kl_ratio * config.LAMBDA_KL * combined_kl_loss
         # print('loss_total: ', loss_total)
         # print('unnormalized_loss: ', unnormalized_loss)
@@ -241,7 +289,8 @@ def criterion(output, img, text_input, mask_img, mask_text):
                 'combined_loss_total': loss_total,
                 'combined_img_loss': img_loss_L2,
                 'combined_text_loss': text_loss,
-                'combined_kl_loss': combined_kl_loss
+                'combined_kl_loss': combined_kl_loss,
+                'diffusion_loss': img_loss_diffusion
                 }
 
 def custom_collate_fn(batch):
@@ -298,13 +347,27 @@ if __name__ == "__main__":
         os.makedirs('checkpoints')
     if not os.path.exists('logs'):
         os.makedirs('logs')
-    if not os.path.exists('logs/' + args.config):
-        os.makedirs('logs/' + args.config)
+    if not os.path.exists('logs/' + args.config + datetime_str):
+        save_dir = 'logs/' + args.config + datetime_str
+        os.makedirs(save_dir)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = T2IVAE().to(device)
 
+    if hasattr(config, 'PRETRAINED_IMG_ENC'):
+        img_enc_path = 'checkpoints/' + config.PRETRAINED_IMG_ENC + '.pt'
+        model.img_encoder.load_state_dict(torch.load(img_enc_path), strict=False)
+        print('loaded pretrained img encoder')
+
     optimizer = torch.optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=config.LEARNING_RATE)
+    # ema = EMA(0.995)
+    # ema_model = copy.deepcopy(model).eval().requires_grad_(False)
+    
+    if hasattr(config, 'DIFFUSION') and config.DIFFUSION:
+        use_diffusion = True
+    else:
+        use_diffusion = False
 
     if hasattr(config, 'LR_SCHEDULER') and config.LR_SCHEDULE:
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.LR_SCHEDULE_STEP, gamma=config.LR_SCHEDULE_GAMMA) # multiply lr by gamma every step_size epochs
@@ -388,8 +451,8 @@ if __name__ == "__main__":
     best_val_loss = float('inf')
 
     for epoch in range(config.NUM_EPOCHS):
-        train_loss = train_epoch(model, train_loader, optimizer)
-        val_loss = val_epoch(model, val_loader)
+        train_loss = train_epoch(model, train_loader, optimizer, use_diffusion)
+        val_loss = val_epoch(model, val_loader, use_diffusion)
         wandb.log({'train_loss': train_loss, 'val_loss': val_loss}, step=epoch)
         print("Epoch: ", epoch)
 
@@ -401,12 +464,8 @@ if __name__ == "__main__":
             best_val_loss = val_loss
             torch.save(model.state_dict(), 'checkpoints/' + args.config + '_best.pt')
             print("Saved best model")
-        if epoch % 100 == 0:
+        if epoch % 10 == 0 and epoch > 0:
             torch.save(model.state_dict(), 'checkpoints/' + args.config + '_epoch' + str(epoch) + '.pt')
             print("Saved model at epoch ", epoch)
 
     print('Number of samples: ', len(train_loader))
-
-
-    
-        
