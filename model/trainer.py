@@ -30,7 +30,7 @@ def train_epoch(model, train_loader, optimizer, use_diffusion):
             if hasattr(config, 'DIFFUSION') and config.DIFFUSION:
                 use_diffusion = True
             print('in masking phase')
-            mask_img, mask_text = get_masks() 
+            mask_img, mask_text = get_masks(warmup=False) 
         else:
             mask_img, mask_text = False, False
 
@@ -64,8 +64,6 @@ def train_epoch(model, train_loader, optimizer, use_diffusion):
 
         loss = loss_dict['loss_total']
         loss.backward()
-
-   
 
         if hasattr(config, 'CLIP_GRADS') and config.CLIP_GRADS:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.CLIP_GRADS_NORM)
@@ -211,6 +209,18 @@ def criterion(output, img, text_input, mask_img, mask_text, use_diffusion):
         # print('text_ratio * text_loss: ', text_ratio * text_loss)
         # print('kl_ratio * combined_kl_loss: ', kl_ratio * combined_kl_loss)
         
+        # ensuring each loss is weighted equally
+        unnormalized_loss = abs(text_loss) + abs(combined_kl_loss)
+        text_ratio = abs(unnormalized_loss) / abs(text_loss)
+        kl_ratio = abs(unnormalized_loss) / abs(combined_kl_loss)
+        # loss_total = text_ratio * config.LAMBDA_TEXT * text_loss + kl_ratio * config.LAMBDA_KL * combined_kl_loss
+        # print('loss_total: ', loss_total)
+        # print('unnormalized_loss: ', unnormalized_loss)
+        # print('text_ratio: ', text_ratio)
+        # print('kl_ratio: ', kl_ratio)
+        # print('text_ratio * text_loss: ', text_ratio * text_loss)
+        # print('kl_ratio * combined_kl_loss: ', kl_ratio * combined_kl_loss)
+        
         return {
             'loss_total': loss_total,
             'text_only_loss_total': loss_total,
@@ -234,6 +244,7 @@ def criterion(output, img, text_input, mask_img, mask_text, use_diffusion):
         # unnormalized_loss = abs(img_loss_gaussian) + abs(combined_kl_loss)
         # img_ratio = abs(unnormalized_loss) / abs(img_loss_gaussian)
         # kl_ratio = abs(unnormalized_loss) / abs(combined_kl_loss)
+
         # loss_total = img_ratio * config.LAMBDA_IMAGE * img_loss_gaussian + kl_ratio * config.LAMBDA_KL * combined_kl_loss
         # print('loss_total: ', loss_total)
         # print('unnormalized_loss: ', unnormalized_loss)

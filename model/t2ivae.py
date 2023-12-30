@@ -161,13 +161,30 @@ class T2IVAE(nn.Module):
             noise = torch.zeros_like(pred_img)
             t = torch.zeros(img.shape[0]).to(self.device)
             unconditioned = False
-
+            
         # text decoder
         # text_decoder_input = self.text_decoder_proj(sampled_text_latent).view(-1, self.config.MAX_SEQ_LEN, 512)
         text_decoder_input = self.text_decoder_proj(self.combined_embedding).view(-1, self.config.MAX_SEQ_LEN, 512)
         text_decoder_out = self.t5.decoder(input_ids=self.placeholder_input, encoder_hidden_states=text_decoder_input, encoder_attention_mask=text_inputs["attention_mask"].to(self.device))
         pred_text = self.t5.lm_head(text_decoder_out.last_hidden_state) # (batch_size, seq_len, vocab_size)
         pred_text = pred_text.view(-1, text.shape[1], self.t5.config.vocab_size)
+
+        # text to image
+        # t2i_input = self.img_decoder_proj(sampled_text_latent).view(-1, 512, self.img_size // 32, self.img_size // 32)
+        # t2i_input = self.img_decoder_proj(combined_embedding).view(-1, 512, self.img_size // 32, self.img_size // 32)
+        # pred_img_t2i = self.img_decoder(t2i_input)
+        pred_img_t2i = pred_img_means
+        # pred_img_t2i_gaussian = self.gaussian_img_decoder(t2i_input)
+        # pred_img_t2i_means = pred_img_t2i_gaussian[:, :3, :, :]
+        # pred_img_t2i_logvars = pred_img_t2i_gaussian[:, 3:, :, :]
+
+        # image to text
+        # i2t_input = self.text_decoder_proj(sampled_img_latent).view(-1, self.config.MAX_SEQ_LEN, 512)
+        # i2t_input = self.text_decoder_proj(combined_embedding).view(-1, self.config.MAX_SEQ_LEN, 512)
+        # i2t_decoder_out = self.t5.decoder(input_ids=self.placeholder_input, encoder_hidden_states=i2t_input, encoder_attention_mask=text_inputs["attention_mask"].to(device))
+        # pred_text_i2t = self.t5.lm_head(i2t_decoder_out.last_hidden_state) # (batch_size, seq_len, vocab_size)
+        # pred_text_i2t = pred_text_i2t.view(-1, text.shape[1], self.t5.config.vocab_size)
+        pred_text_i2t = pred_text
 
         return {
             "pred_img": pred_img,
@@ -182,6 +199,7 @@ class T2IVAE(nn.Module):
             "img_feat_proj": img_feat_proj,
             "text_feat_proj": text_feat_proj,
             "combined_embedding": self.combined_embedding,
+
             "combined_embedding_means": combined_embedding_means,
             "combined_embedding_logvars": combined_embedding_logvars,
             "unconditioned": unconditioned,

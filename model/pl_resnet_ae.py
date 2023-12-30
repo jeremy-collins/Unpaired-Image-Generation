@@ -213,15 +213,22 @@ class ResNetEncoder(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        print('x input', x.shape)
         x = self.conv1(x)
+        print('x after conv1', x.shape)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
+        print('x after maxpool', x.shape)
 
         x = self.layer1(x)
+        print('x after layer1', x.shape)
         x = self.layer2(x)
+        print('x after layer2', x.shape)
         x = self.layer3(x)
+        print('x after layer3', x.shape)
         x = self.layer4(x)
+        print('x after layer4', x.shape)
 
         # x = self.avgpool(x)
         # print('x after avgpool', x.shape)
@@ -284,20 +291,30 @@ class ResNetDecoder(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        print('decoder input', x.shape)
         x = self.linear(x)
+        print('decoder after linear', x.shape)
 
         # NOTE: replaced this by Linear(in_channels, 514 * 4 * 4)
         # x = F.interpolate(x, scale_factor=4)
 
         x = x.view(x.size(0), 512 * self.expansion, 4, 4)
+        print('decoder after view', x.shape)
         x = self.upscale1(x)
+        print('decoder after upscale1', x.shape)
 
         x = self.layer1(x)
+        print('decoder after layer1', x.shape)
         x = self.layer2(x)
+        print('decoder after layer2', x.shape)
         x = self.layer3(x)
+        print('decoder after layer3', x.shape)
         x = self.layer4(x)
+        print('decoder after layer4', x.shape)
         x = self.upscale(x)
+        print('decoder after upscale', x.shape)
         x = self.conv1(x)
+        print('decoder after conv1', x.shape)
 
         # first three channels are means, last three channels are logvars
         # the range of means should be between 0 and 1
