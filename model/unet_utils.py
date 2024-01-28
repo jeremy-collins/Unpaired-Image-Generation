@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,7 +10,9 @@ class EMA:
         self.step = 0
 
     def update_model_average(self, ma_model, current_model):
-        for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
+        for current_params, ma_params in zip(
+            current_model.parameters(), ma_model.parameters()
+        ):
             old_weight, up_weight = ma_params.data, current_params.data
             ma_params.data = self.update_average(old_weight, up_weight)
 
@@ -47,14 +48,16 @@ class SelfAttention(nn.Module):
         )
 
     def forward(self, x):
-        self.size = x.shape[2] # assuming square image TODO: make this more general
+        self.size = x.shape[2]  # assuming square image TODO: make this more general
         x = x.view(-1, self.channels, self.size * self.size).swapaxes(1, 2)
         # x = x.view(-1, self.channels, x.shape[2] * x.shape[3]).swapaxes(1, 2)
         x_ln = self.ln(x)
         attention_value, _ = self.mha(x_ln, x_ln, x_ln)
         attention_value = attention_value + x
         attention_value = self.ff_self(attention_value) + attention_value
-        return attention_value.swapaxes(2, 1).view(-1, self.channels, self.size, self.size)
+        return attention_value.swapaxes(2, 1).view(
+            -1, self.channels, self.size, self.size
+        )
 
 
 class DoubleConv(nn.Module):
@@ -89,10 +92,7 @@ class Down(nn.Module):
 
         self.emb_layer = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(
-                emb_dim,
-                out_channels
-            ),
+            nn.Linear(emb_dim, out_channels),
         )
 
     def forward(self, x, t):
@@ -114,10 +114,7 @@ class Up(nn.Module):
 
         self.emb_layer = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(
-                emb_dim,
-                out_channels
-            ),
+            nn.Linear(emb_dim, out_channels),
         )
 
     def forward(self, x, skip_x, t):
@@ -129,7 +126,13 @@ class Up(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, c_in=3, c_out=3, time_dim=256, device="cuda"):
+    def __init__(
+        self,
+        c_in=3,
+        c_out=3,
+        time_dim=256,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+    ):
         super().__init__()
         self.device = device
         self.time_dim = time_dim
@@ -196,7 +199,14 @@ class UNet(nn.Module):
 
 
 class UNet_conditional(nn.Module):
-    def __init__(self, c_in=3, c_out=3, time_dim=256, num_classes=None, device="cuda"):
+    def __init__(
+        self,
+        c_in=3,
+        c_out=3,
+        time_dim=256,
+        num_classes=None,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+    ):
         super().__init__()
         self.device = device
         self.time_dim = time_dim
@@ -267,7 +277,8 @@ class UNet_conditional(nn.Module):
         x = self.sa6(x)
         output = self.outc(x)
         return output
-    
+
+
 class EMA:
     def __init__(self, beta):
         super().__init__()
@@ -275,7 +286,9 @@ class EMA:
         self.step = 0
 
     def update_model_average(self, ma_model, current_model):
-        for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
+        for current_params, ma_params in zip(
+            current_model.parameters(), ma_model.parameters()
+        ):
             old_weight, up_weight = ma_params.data, current_params.data
             ma_params.data = self.update_average(old_weight, up_weight)
 
@@ -295,7 +308,8 @@ class EMA:
     def reset_parameters(self, ema_model, model):
         ema_model.load_state_dict(model.state_dict())
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # net = UNet(device="cpu")
     net = UNet_conditional(num_classes=10, device="cpu")
     print(sum([p.numel() for p in net.parameters()]))
