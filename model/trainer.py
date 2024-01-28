@@ -8,9 +8,9 @@ from model.t2ivae import T2IVAE
 from tqdm import tqdm
 import argparse
 import numpy as np
-from model.utils import *
-from model.unet_utils import *
-from model.config_utils import parse_config_args
+from model.utils.utils import *
+from model.models.unet_utils import *
+from model.utils.config_utils import parse_config_args
 import random
 
 # import # wandb

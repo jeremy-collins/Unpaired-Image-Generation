@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+
 class UNet(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(UNet, self).__init__()
@@ -51,21 +52,22 @@ class UNet(nn.Module):
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         )
 
     def up_conv(self, in_channels, out_channels):
-        return nn.ConvTranspose2d(
-            in_channels, out_channels, kernel_size=2, stride=2
-        )
+        return nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+
 
 def add_noise(x, noise_scale):
     return x + noise_scale * torch.randn_like(x)
+
 
 def diffusion_step(model, x_noisy, beta):
     prediction = model(x_noisy)
     x_noisy = (1 - beta) * x_noisy + beta * prediction
     return x_noisy
+
 
 def train(model, data, epochs=100, lr=0.0001, beta=0.1):
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -77,11 +79,12 @@ def train(model, data, epochs=100, lr=0.0001, beta=0.1):
             optimizer.zero_grad()
             x_pred = diffusion_step(model, x_noisy, beta)
             loss = loss_fn(x_pred, x)
-            print('loss: ', loss)
+            print("loss: ", loss)
             loss.backward()
             optimizer.step()
 
-        print(f'Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}')
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+
 
 # Dummy Data (you can replace this with actual data)
 data = [torch.randn(1, 3, 32, 32) for _ in range(100)]
