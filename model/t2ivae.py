@@ -44,6 +44,16 @@ class T2IVAE(nn.Module):
             self.gaussian_img_decoder = get_resnet152_decoder(latent_dim=self.config.LATENT_DIM, input_height=self.img_size, first_conv=False, maxpool1=False, nc=6).to(self.device)
         else:
             raise ValueError('invalid architecture')
+        
+        if hasattr(self.config, 'PRETRAINED_IMG_ENC') and self.config.PRETRAINED_IMG_ENC is not None:
+            img_enc_path = 'checkpoints/' + self.config.PRETRAINED_IMG_ENC + '.pt'
+            self.img_encoder.load_state_dict(torch.load(img_enc_path), strict=False)
+            print('loaded pretrained img encoder from', img_enc_path)
+
+        if hasattr(self.config, 'FREEZE_IMG_ENC') and self.config.FREEZE_IMG_ENC:
+            for param in self.img_encoder.parameters():
+                param.requires_grad = False
+            print('frozen img encoder')
 
         t5_size = 'small'
         self.t5 = T5ForConditionalGeneration.from_pretrained('t5-' + t5_size).to(self.device)
@@ -114,19 +124,28 @@ class T2IVAE(nn.Module):
             combined_embedding_means = torch.zeros_like(img_feat_proj)
             combined_embedding_logvars = torch.zeros_like(img_feat_proj)
         else:
-            if mask_img:
-                # replace img features with zeros
-                combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(torch.zeros_like(img_feat_proj), text_feat_proj)
-            elif mask_text:
-                # replace text features with zeros
-                combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(img_feat_proj, torch.zeros_like(text_feat_proj))
-            else:
-                combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(img_feat_proj, text_feat_proj)
+            # if mask_img:
+            #     # replace img features with zeros
+            #     combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(torch.zeros_like(img_feat_proj), text_feat_proj)
+            # elif mask_text:
+            #     # replace text features with zeros
+            #     combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(img_feat_proj, torch.zeros_like(text_feat_proj))
+            # else:
+            #   combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(img_feat_proj, text_feat_proj)
+
+            # we now want to mask out instances instead of entire batches
+            # both projs have shape (batch_size, latent_dim)
+            # mask_img and mask_text are boolean tensors of shape (batch_size,)
+            img_feat_proj = img_feat_proj * (1 - mask_img[:, None])
+            text_feat_proj = text_feat_proj * (1 - mask_text[:, None])
+            print('img_feat_proj', img_feat_proj)
+            print('text_feat_proj', text_feat_proj)
+            combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(img_feat_proj, text_feat_proj)
+
             # combined_embedding_logvars -= 4 # lowering logvars by subtracting a constant (e.g. 3-5ish)
             self.combined_embedding = self.sample_gaussian(combined_embedding_means, combined_embedding_logvars) 
             # self.combined_embedding = combined_embedding_means # TODO: REMOVE THIS LINE
         
-
         # img decoder
         # if hasattr(self.config, 'DIFFUSION') and self.config.DIFFUSION:
         if use_diffusion:
@@ -135,6 +154,7 @@ class T2IVAE(nn.Module):
             t = self.diffusion.sample_timesteps(img.shape[0]).to(self.device)
             # noise_step = torch.randint(0, self.diffusion.noise_steps, (img.shape[0],)).to(self.device)
             noised_img, noise = self.diffusion.noise_images(img, t)
+            
             print('noised_img', noised_img.shape)
             print('noise', noise.shape)
             print('noise step', t.shape)
