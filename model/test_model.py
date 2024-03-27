@@ -21,8 +21,9 @@ model = T2IVAE().to(device)
 model.load_state_dict(torch.load('checkpoints/' + args.model + '.pt'))
 model.eval()
 
+
 def custom_collate_fn(batch):
-    images, texts = zip(*batch)
+    images, texts, mask_imgs, mask_texts = zip(*batch)
 
     if config.DATASET == 'coco':
         # generating a random caption index from 0 to 4 for each image
@@ -57,12 +58,10 @@ def custom_collate_fn(batch):
     # ignoring padding tokens
     text_input["attention_mask"] = (text_input["input_ids"] != model.tokenizer.pad_token_id)
 
-    print('padded text_input ids: ', text_input["input_ids"].shape)
-
     # so we can access the raw text later
     # text_input["raw_text"] = torch.tensor(texts)
 
-    return images, text_input
+    return images, text_input, torch.tensor(mask_imgs), torch.tensor(mask_texts)
 
 if config.DATASET == 'coco':
     if stage == 'train':
@@ -135,7 +134,7 @@ with torch.no_grad():
         else:
             mask_img, mask_text = False, False
 
-        output = model(img, text_input, mask_img, mask_text)
+        output = model(img, text_input, mask_img, mask_text, use_diffusion=config.DIFFUSION)
         print('combined embedding means (mean, std): ', output['combined_embedding_means'].mean(), output['combined_embedding_means'].std())
         print('combined embedding logvars (mean, std): ', output['combined_embedding_logvars'].mean(), output['combined_embedding_logvars'].std())
         disp_img = visualize_data(img, text_input, model.tokenizer, output, config, mask_img, mask_text, model, sample_diffusion=True)

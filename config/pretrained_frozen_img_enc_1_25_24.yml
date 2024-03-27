@@ -1,9 +1,9 @@
 BATCH_SIZE: 128
-NUM_EPOCHS: 20
+NUM_EPOCHS: 50
 NUM_WORKERS: 12
 LEARNING_RATE: 0.0001
 MAX_SEQ_LEN: 8 # max sequence length for text, in tokens
-LATENT_DIM: 1024 # dimension of multimodal latent space
+LATENT_DIM: 512 # dimension of multimodal latent space
 DATASET: cifar10 # cifar10, cifar100, coco
 ARCHITECTURE: resnet18 # resnet18, resnet50, resnet101, resnet152 
 
@@ -17,5 +17,5 @@ CLIP_GRADS: False
 CLIP_GRADS_NORM: 1.0 # gradient clipping norm if CLIP_GRADS is True
 DIFFUSION: True # whether to use diffusion img decoder, otherwise inverse resnet
 CONDITIONING: concat-mlp
-# PRETRAINED_IMG_ENC: default_latest # file name of pretrained image encoder, if any
-# CHECKPOINT: pretrained_frozen_img_enc_1_25_24_latest # checkpoint to load, overrides PRETRAINED_IMG_ENC
+PRETRAINED_IMG_ENC: t2ivae_combined_cifar10_resnet18_img_recon_L2_no_avgpool_latent512_8_22_latest # file name of pretrained image encoder, if any
+FREEZE_IMG_ENC: True

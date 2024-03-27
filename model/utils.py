@@ -25,7 +25,8 @@ def kl_divergence(mu1, logvar1, mu2, logvar2):
     # Calculate KL divergence
     kl_div = 0.5 * (logvar2 - logvar1 + (torch.exp(logvar1) + (mu1 - mu2)**2) / torch.exp(logvar2) - 1) # (batch_size, hidden_dim)
 
-    return torch.mean(kl_div) # summing over all elements in the batch
+    # return torch.mean(kl_div) # summing over all elements in the batch
+    return kl_div.mean(dim=1) # shape: (batch_size,)
 
 def get_viewable_text(token_ids, tokenizer):
     # decoding text from token ids, stopping at eos token
@@ -103,15 +104,15 @@ def visualize_data(img_input, text_input, tokenizer, output=None, config=None, m
         text_output = get_viewable_text(pred_token_ids, tokenizer)
 
 
-        if not mask_img and not mask_text: # vae
+        if not mask_img[0] and not mask_text[0]: # vae
             disp_gt_img = cv2.putText(gt_img, 'ground truth: ' + text_gt, (0, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)
             disp_pred_img = cv2.putText(img_output, 'vae output: ' + text_output, (0, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)
         
-        elif mask_img and not mask_text: # t2i
+        elif mask_img[0] and not mask_text[0]: # t2i
             disp_gt_img = cv2.putText(zero_img, 'ground truth: ' + text_gt, (0, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)
             disp_pred_img = cv2.putText(img_output, 'pred image from text (' + text_gt + ')', (0, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)
 
-        elif mask_text and not mask_img: # i2t
+        elif mask_text[0] and not mask_img[0]: # i2t
             disp_gt_img = cv2.putText(gt_img, 'ground truth: ' + text_gt, (0, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)
             disp_pred_img = cv2.putText(zero_img, 'pred text from image: ' + text_output, (0, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)
 
@@ -130,26 +131,30 @@ def visualize_data(img_input, text_input, tokenizer, output=None, config=None, m
     return disp_img
 
 class MaskedDataset(Dataset):
-    def __init__(self, dataset_class, model, *args, **kwargs):
+    def __init__(self, dataset_class, model, mask_percents, *args, **kwargs):
         self.dataset = dataset_class(*args, **kwargs)
         self.model = model
+        self.mask_percents = mask_percents
 
     def __getitem__(self, index):
         # Make a deep copy of the image and caption
         image, caption = copy.deepcopy(self.dataset[index])
 
-        # Apply the masking
-        mask_img = random.randint(0, 1)
-        mask_text = random.randint(0, 1)
-        if mask_img:
-            image = torch.zeros_like(image)
-        if mask_text:
-            print('caption: ', caption)
-            # caption["input_ids"] = torch.full_like(caption["input_ids"], self.model.tokenizer.eos_token_id)
-            caption = self.model.tokenizer.eos_token_id
+        # we want the masks to be deterministic, so we can set the seed to the index
+        random.seed(index)
+        randnum = random.random() # given the index, this will always return the same random number in the range (0, 1)
+        mask_img, mask_text = False, False
 
+        if randnum < self.mask_percents['mask_img']:
+            mask_img = True
+        elif randnum >= self.mask_percents['mask_img'] and randnum < (self.mask_percents['mask_img'] + self.mask_percents['mask_text']):
+            # caption["input_ids"] = torch.full_like(caption["input_ids"], self.model.tokenizer.eos_token_id)
+            # caption["input_ids"] = torch.zeros_like(caption["input_ids"])
+            mask_text = True
+        elif randnum >= (self.mask_percents['mask_img'] + self.mask_percents['mask_text']):
+            pass
         
-        return image, caption
+        return image, caption, int(mask_img), int(mask_text)
 
     def __len__(self):
         return len(self.dataset)
