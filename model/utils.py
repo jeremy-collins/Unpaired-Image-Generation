@@ -159,8 +159,13 @@ class MaskedDataset(Dataset):
     def __len__(self):
         return len(self.dataset)
     
-def get_masks():
+def get_masks(warmup=False): # TODO: add warmup condition, move out of trainer
     # 3 possible states
+    # if warmup:
+    #     mask_state = random.randint(0, 2)
+    # else:
+    #     mask_state = random.randint(0, 1) # only mask one thing at a time if not warmup
+
     mask_state = random.randint(0, 2)
 
     if mask_state == 0:
