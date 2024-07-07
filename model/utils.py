@@ -11,6 +11,7 @@ import numpy as np
 from model.utils import *
 import random
 import copy
+import wandb
 
 def kl_divergence(mu1, logvar1, mu2, logvar2):
     # kl divergence from means and logvars
@@ -82,8 +83,10 @@ def visualize_data(img_input, text_input, tokenizer, output=None, config=None, m
             if sample_diffusion:
                 img_output = model.diffusion.sample(model.unet, 1, model.combined_embedding[0], cfg_scale=0)[0]
                 # img_output = model.diffusion.sample(model.unet, 1, model.combined_embedding[0], cfg_scale=3)
+                # wandb.log({"predicted image after reverse diffusion": wandb.Image(img_output)})
             else:
                 img_output = output['pred_img'][0]
+                # wandb.log({"predicted image after single forward pass": wandb.Image(img_output)})
 
             gt_img = cv2.putText(gt_img, 'noise step: ' + str(output['noise_step'][0].item()), (0, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)
             zero_img = cv2.putText(zero_img, 'noise step: ' + str(output['noise_step'][0].item()), (0, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 1), 2)

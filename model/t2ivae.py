@@ -5,7 +5,8 @@ from transformers import T5Model, T5EncoderModel, T5Tokenizer, BertModel, BertTo
 from model.pl_resnet_ae import * # resnet encoder and decoder
 import numpy as np
 from model.config_utils import parse_config_args
-from model.t2idiffusion import Diffusion
+# from model.t2idiffusion import Diffusion
+from model.diffusers_utils import Diffusion
 from model.unet_utils import *
 
 class T2IVAE(nn.Module):
@@ -154,11 +155,6 @@ class T2IVAE(nn.Module):
             t = self.diffusion.sample_timesteps(img.shape[0]).to(self.device)
             # noise_step = torch.randint(0, self.diffusion.noise_steps, (img.shape[0],)).to(self.device)
             noised_img, noise = self.diffusion.noise_images(img, t)
-            
-            print('noised_img', noised_img.shape)
-            print('noise', noise.shape)
-            print('noise step', t.shape)
-            print('combined_embedding', self.combined_embedding.shape)
             
             label = self.combined_embedding
 

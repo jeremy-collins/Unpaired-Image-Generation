@@ -21,9 +21,6 @@ def train_epoch(model, train_loader, optimizer, use_diffusion):
     loss_sum = 0
     avg_loss_dict = {}
     for i, (img, text, mask_img, mask_text) in enumerate(tqdm(train_loader)):
-        print('mask_img in train_epoch: ', mask_img)
-        print('mask_text in train_epoch: ', mask_text)
-        print('using diffusion: ', use_diffusion)
         if hasattr(config, 'WARMUP_EPOCHS') and epoch < config.WARMUP_EPOCHS:
             use_diffusion = False # using resnet decoder for vae warmup
             print('in warmup phase')
@@ -39,13 +36,17 @@ def train_epoch(model, train_loader, optimizer, use_diffusion):
 
         if args.debug and i % 20 == 0:
             sample_diffusion = False
-            if i % 200 == 0 and use_diffusion:
+            if i % 300 == 0 and use_diffusion:
                 sample_diffusion = True
             print('sample diffusion: ', sample_diffusion)
             disp_img = visualize_data(img, text_input, model.tokenizer, output, config, mask_img, mask_text, model=model, sample_diffusion=sample_diffusion)
             cv2.imshow('disp_img', disp_img)
             cv2.waitKey(1)
-            datetime_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            if sample_diffusion:
+                wandb.log({"pred train image after reverse diffusion": wandb.Image(disp_img[:,:,::-1])})
+            else:
+                wandb.log({"pred train image after single forward pass": wandb.Image(disp_img[:,:,::-1])})
+            # datetime_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             # cv2.imwrite('logs/' + args.config + '/train_' + str(epoch) + '_' + datetime_str + '.jpg', (disp_img * 255).astype(np.uint8))
 
         loss_dict = criterion(output, img, text_input, mask_img, mask_text, use_diffusion)
@@ -76,12 +77,9 @@ def train_epoch(model, train_loader, optimizer, use_diffusion):
                 avg_loss_dict[key]['value'] += loss_dict[key]['value']
                 avg_loss_dict[key]['count'] += loss_dict[key]['count']
 
-    print('avg_loss_dict: ', avg_loss_dict)
     for key in avg_loss_dict:
         avg_loss_dict[key]['value'] /= avg_loss_dict[key]['count']
         wandb.log({key + '_avg_train': avg_loss_dict[key]['value']}, step=epoch)
-
-    print('avg_loss_dict after division: ', avg_loss_dict)
 
     return avg_loss_dict["loss_total"]["value"]
 
@@ -91,9 +89,6 @@ def val_epoch(model, val_loader, use_diffusion):
     avg_loss_dict = {}
     with torch.no_grad():
         for i, (img, text, mask_img, mask_text) in enumerate(tqdm(val_loader)):
-            print('mask_img in val_epoch: ', mask_img)
-            print('mask_text in val_epoch: ', mask_text)
-            print('using diffusion: ', use_diffusion)
             if hasattr(config, 'WARMUP_EPOCHS') and epoch < config.WARMUP_EPOCHS:
                 use_diffusion = False # using resnet decoder for vae warmup
                 print('in warmup phase')
@@ -112,9 +107,14 @@ def val_epoch(model, val_loader, use_diffusion):
                 disp_img = visualize_data(img, text_input, model.tokenizer, output, config, mask_img, mask_text, model=model, sample_diffusion=sample_diffusion)
                 cv2.imshow('disp_img', disp_img)
                 cv2.waitKey(1)
-                datetime_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-                cv2.imwrite(save_dir + '/val_' + str(epoch) + '_' + datetime_str + '.jpg', (disp_img * 255).astype(np.uint8))
-                print('saved val image to', save_dir + '/val_' + str(epoch) + '_' + datetime_str + '.jpg')
+                if sample_diffusion:
+                    wandb.log({"pred val image after reverse diffusion": wandb.Image(disp_img[:,:,::-1])})
+                else:
+                    wandb.log({"pred val image after single forward pass": wandb.Image(disp_img[:,:,::-1])})
+            # datetime_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                # datetime_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                # cv2.imwrite(save_dir + '/val_' + str(epoch) + '_' + datetime_str + '.jpg', (disp_img * 255).astype(np.uint8))
+                # print('saved val image to', save_dir + '/val_' + str(epoch) + '_' + datetime_str + '.jpg')
 
             loss_dict = criterion(output, img, text_input, mask_img, mask_text, use_diffusion)
 
