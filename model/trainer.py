@@ -79,7 +79,8 @@ def train_epoch(model, train_loader, optimizer, use_diffusion):
 
     for key in avg_loss_dict:
         avg_loss_dict[key]['value'] /= avg_loss_dict[key]['count']
-        wandb.log({key + '_avg_train': avg_loss_dict[key]['value']}, step=epoch)
+        # wandb.log({key + '_avg_train': avg_loss_dict[key]['value']}, step=epoch)
+        wandb.log({key + '_avg_train': avg_loss_dict[key]['value'].item()})
 
     return avg_loss_dict["loss_total"]["value"]
 
@@ -145,7 +146,8 @@ def val_epoch(model, val_loader, use_diffusion):
         print('avg_loss_dict: ', avg_loss_dict)
         for key in avg_loss_dict:
             avg_loss_dict[key]['value'] /= avg_loss_dict[key]['count']
-            wandb.log({key + '_avg_val': avg_loss_dict[key]['value']}, step=epoch)
+            # wandb.log({key + '_avg_val': avg_loss_dict[key]['value']}, step=epoch)
+            wandb.log({key + '_avg_val': avg_loss_dict[key]['value'].item()})
 
         print('avg_loss_dict after division: ', avg_loss_dict)
 
@@ -363,7 +365,7 @@ def custom_collate_fn(batch):
 
 if __name__ == "__main__":
     config, args = parse_config_args()
-    wandb.init(project='unpaired_t2i')
+    wandb.init(project='unpaired_t2i', mode='online')
     wandb.config.update(config)
     wandb.config.update(args)
     
@@ -384,9 +386,17 @@ if __name__ == "__main__":
     if hasattr(config, 'PRETRAINED_IMG_ENC'):
         img_enc_path = 'checkpoints/' + config.PRETRAINED_IMG_ENC + '.pt'
         model.img_encoder.load_state_dict(torch.load(img_enc_path), strict=False)
+        model.img_feat_proj.load_state_dict(torch.load(img_enc_path), strict=False)
+        model.text_feat_proj.load_state_dict(torch.load(img_enc_path), strict=False)
+        model.combined_mean_proj.load_state_dict(torch.load(img_enc_path), strict=False)
+        model.combined_logvar_proj.load_state_dict(torch.load(img_enc_path), strict=False)
+        model.combined_mlp.load_state_dict(torch.load(img_enc_path), strict=False)
         print('loaded pretrained img encoder')
 
     if hasattr(config, 'CHECKPOINT') and config.CHECKPOINT is not None:
+        # NOTE: this will overwrite the pretrained img encoder
+        if hasattr(config, 'PRETRAINED_IMG_ENC'):
+            print('WARNING: overwriting pretrained img encoder with checkpoint')
         model.load_state_dict(torch.load('checkpoints/' + config.CHECKPOINT + '.pt'))
         print('loaded checkpoint: ', config.CHECKPOINT)
 

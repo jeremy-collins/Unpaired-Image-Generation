@@ -1,0 +1,24 @@
+BATCH_SIZE: 512
+NUM_EPOCHS: 50
+NUM_WORKERS: 12
+LEARNING_RATE: 0.0001
+MAX_SEQ_LEN: 8
+LATENT_DIM: 512
+DATASET: cifar10
+ARCHITECTURE: resnet18
+
+# to test img reconstruction, set MASKING to False and LAMBDA_IMAGE to 1.0, LAMBDA_TEXT to 0.0, LAMBDA_KL to 0.0
+MASKING: False
+LAMBDA_IMAGE: 1.0 # weight of image loss
+LAMBDA_TEXT: 0.0 # weight of text loss
+LAMBDA_KL: 0.0 # weight of KL loss with unit Gaussian prior
+WARMUP_EPOCHS: 0 # number of warmup epochs (unmasked training)
+CLIP_GRADS: True
+CLIP_GRADS_NORM: 1.0
+DIFFUSION: True # whether to use diffusion img decoder, otherwise inverse resnet
+# IMG_LOSS: l2 # l1 or l2
+CONDITIONING: concat-mlp
+# PRETRAINED_IMG_ENC: t2ivae_combined_cifar10_resnet18_img_recon_L2_no_avgpool_latent512_8_22_latest # file name of pretrained image encoder, if any
+# CHECKPOINT: pretrained_frozen_img_enc_2_15_24_latest # checkpoint to load, overrides PRETRAINED_IMG_ENC
+FREEZE_IMG_ENC: False
+MASK_PERCENTS_DICT: {"mask_img": 0., "mask_text": 1., "no_mask": 0.}

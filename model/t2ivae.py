@@ -51,11 +51,6 @@ class T2IVAE(nn.Module):
             self.img_encoder.load_state_dict(torch.load(img_enc_path), strict=False)
             print('loaded pretrained img encoder from', img_enc_path)
 
-        if hasattr(self.config, 'FREEZE_IMG_ENC') and self.config.FREEZE_IMG_ENC:
-            for param in self.img_encoder.parameters():
-                param.requires_grad = False
-            print('frozen img encoder')
-
         t5_size = 'small'
         self.t5 = T5ForConditionalGeneration.from_pretrained('t5-' + t5_size).to(self.device)
         self.tokenizer = T5Tokenizer.from_pretrained('t5-' + t5_size)
@@ -72,6 +67,21 @@ class T2IVAE(nn.Module):
         self.text_feat_proj = nn.LazyLinear(self.config.LATENT_DIM)
         self.combined_mean_proj = nn.LazyLinear(self.config.LATENT_DIM)
         self.combined_logvar_proj = nn.LazyLinear(self.config.LATENT_DIM)
+
+        if hasattr(self.config, 'FREEZE_IMG_ENC') and self.config.FREEZE_IMG_ENC:
+            for param in self.img_encoder.parameters():
+                param.requires_grad = False
+            # freezing the projections too
+            for param in self.img_feat_proj.parameters():
+                param.requires_grad = False
+            for param in self.combined_mean_proj.parameters():
+                param.requires_grad = False
+            for param in self.combined_logvar_proj.parameters():
+                param.requires_grad = False
+            for param in self.combined_mlp.parameters():
+                param.requires_grad = False
+
+            print('frozen img encoder and projections')
 
         if hasattr(self.config, 'DIFFUSION') and self.config.DIFFUSION:
             del self.gaussian_img_decoder
@@ -139,8 +149,6 @@ class T2IVAE(nn.Module):
             # mask_img and mask_text are boolean tensors of shape (batch_size,)
             img_feat_proj = img_feat_proj * (1 - mask_img[:, None])
             text_feat_proj = text_feat_proj * (1 - mask_text[:, None])
-            print('img_feat_proj', img_feat_proj)
-            print('text_feat_proj', text_feat_proj)
             combined_embedding_means, combined_embedding_logvars  = self.get_combined_embedding(img_feat_proj, text_feat_proj)
 
             # combined_embedding_logvars -= 4 # lowering logvars by subtracting a constant (e.g. 3-5ish)
